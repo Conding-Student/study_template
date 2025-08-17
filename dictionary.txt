@@ -1,0 +1,13 @@
+RESPONSE & RETURN CODES:
+    1.  Response code 200 and retCode 200
+        -Request is success and completely done.
+    2.  Response code 200 and retCode 201
+        -Request encountered an error while processing and parsing data.
+    3.  Response code 200 and retCode 202
+        -Request encountered an error in database connection.
+    4.  Response code 200 and retCode 203
+        -Request encountered an error in database query.
+    5.  Response code 200 and retCode 204
+        -Request encountered an error in third party request.
+    6.  Response code 200 and retCode 205
+        -Request is unauthorized.
