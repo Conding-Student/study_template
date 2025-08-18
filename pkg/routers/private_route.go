@@ -3,6 +3,7 @@ package routers
 import (
 	"time"
 
+	//controllers "github.com/Conding-Student/study_template/pkg/controllers"
 	"github.com/Conding-Student/study_template/pkg/controllers/healthchecks"
 	middleware "github.com/Conding-Student/study_template/pkg/utils"
 
@@ -20,7 +21,6 @@ func SetupPrivateRoutes(app *fiber.App) {
 		SetCookies:   true,
 		SecretKey:    []byte(middleware.GetEnv("SECRET_KEY")),
 	}))
-
 	// Endpoints
 	apiEndpoint := app.Group("/api")
 	publicEndpoint := apiEndpoint.Group("/private")
@@ -28,5 +28,7 @@ func SetupPrivateRoutes(app *fiber.App) {
 
 	// Service health check
 	v1Endpoint.Get("/", healthchecks.CheckServiceHealth)
+
+	//register user
 
 }
