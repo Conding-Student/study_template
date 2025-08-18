@@ -2,11 +2,12 @@
 package config
 
 import (
-	"Template/pkg/utils"
-	"Template/pkg/utils/go-utils/database"
-	"Template/pkg/utils/go-utils/encryptDecrypt"
-	httpUtils "Template/pkg/utils/go-utils/http"
 	"fmt"
+
+	"github.com/Conding-Student/study_template/pkg/utils"
+	"github.com/Conding-Student/study_template/pkg/utils/go-utils/database"
+	"github.com/Conding-Student/study_template/pkg/utils/go-utils/encryptDecrypt"
+	httpUtils "github.com/Conding-Student/study_template/pkg/utils/go-utils/http"
 
 	"log"
 	"net/http"

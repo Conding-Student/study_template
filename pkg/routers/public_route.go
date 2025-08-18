@@ -1,7 +1,7 @@
 package routers
 
 import (
-	"Template/pkg/controllers/healthchecks"
+	"github.com/Conding-Student/study_template/pkg/controllers/healthchecks"
 
 	"github.com/gofiber/fiber/v2"
 )

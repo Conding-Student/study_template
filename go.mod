@@ -1,4 +1,4 @@
-module Template
+module github.com/Conding-Student/study_template
 
 go 1.20
 

@@ -1,11 +1,12 @@
 package main
 
 import (
-	routers "Template/pkg/routers"
-	middleware "Template/pkg/utils"
 	"fmt"
 	"log"
 	"os"
+
+	routers "github.com/Conding-Student/study_template/pkg/routers"
+	middleware "github.com/Conding-Student/study_template/pkg/utils"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"

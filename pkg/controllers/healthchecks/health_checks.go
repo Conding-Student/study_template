@@ -1,8 +1,8 @@
 package healthchecks
 
 import (
-	"Template/pkg/models/errors"
-	"Template/pkg/models/response"
+	"github.com/Conding-Student/study_template/pkg/models/errors"
+	"github.com/Conding-Student/study_template/pkg/models/response"
 
 	"github.com/gofiber/fiber/v2"
 )

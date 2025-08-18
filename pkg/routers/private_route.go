@@ -1,11 +1,12 @@
 package routers
 
 import (
-	"Template/pkg/controllers/healthchecks"
-	middleware "Template/pkg/utils"
 	"time"
 
-	fiberUtils "Template/pkg/utils/go-utils/fiber"
+	"github.com/Conding-Student/study_template/pkg/controllers/healthchecks"
+	middleware "github.com/Conding-Student/study_template/pkg/utils"
+
+	fiberUtils "github.com/Conding-Student/study_template/pkg/utils/go-utils/fiber"
 
 	"github.com/gofiber/fiber/v2"
 )
