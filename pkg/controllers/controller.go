@@ -2,229 +2,205 @@ package controllers
 
 import (
 	"log"
-
+	"regexp"
 	"strings"
 
 	errors "github.com/Conding-Student/study_template/pkg/models/errors"
+	response "github.com/Conding-Student/study_template/pkg/models/response"
 	middleware "github.com/Conding-Student/study_template/pkg/utils/go-utils/database"
 	fiberUtils "github.com/Conding-Student/study_template/pkg/utils/go-utils/fiber"
 	passwordHashing "github.com/Conding-Student/study_template/pkg/utils/go-utils/passwordHashing"
 	"github.com/gofiber/fiber/v2"
 )
 
+// ========================= Create User =========================
 func CreateUser(c *fiber.Ctx) error {
-	user := make(map[string]any)
 	db := middleware.DBConn
 
+	// Parse request body
+	var user map[string]any
 	if err := c.BodyParser(&user); err != nil {
-		return c.JSON(errors.ErrorModel{
-			Message:   "Cannot parse JSON",
-			IsSuccess: false,
-			Error:     err,
-		})
-	}
-
-	requiredFields := []string{"username", "email", "password", "first_name", "last_name", "age"}
-	for _, field := range requiredFields {
-		if user[field] == nil {
-			return c.JSON(errors.ErrorModel{
-				Message:   field + " is required",
+		return c.JSON(response.ResponseModel{
+			RetCode: "400",
+			Message: "Invalid request body",
+			Data: errors.ErrorModel{
+				Message:   "Cannot parse JSON",
 				IsSuccess: false,
-			})
-		}
+				Error:     err,
+			},
+		})
 	}
 
-	var age int
-	// if val, ok := user["age"].(float64); ok {
-	// 	age = int(val)
-	// 	if age <= 0 {
-	// 		return c.JSON(errors.ErrorModel{
-	// 			Message:   "Age must be a positive number",
-	// 			IsSuccess: false,
-	// 		})
-	// 	}
-	// } else {
-	// 	return c.JSON(errors.ErrorModel{
-	// 		Message:   "Invalid age",
-	// 		IsSuccess: false,
-	// 	})
-	// }
-
+	// Extract fields
+	username := user["username"].(string)
+	firstName := user["first_name"].(string)
+	lastName := user["last_name"].(string)
+	ageVal := user["age"].(float64)
 	email := strings.ToLower(strings.TrimSpace(user["email"].(string)))
-	password := user["password"].(string) // keep password as is
+	password := user["password"].(string)
 
-	// Manual password complexity check
-	var hasUpper, hasLower, hasNumber, hasSpecial bool
-	if len(password) >= 8 {
-		for _, c := range password {
-			switch {
-			case 'A' <= c && c <= 'Z':
-				hasUpper = true
-			case 'a' <= c && c <= 'z':
-				hasLower = true
-			case '0' <= c && c <= '9':
-				hasNumber = true
-			case strings.ContainsRune("!@#$%^&*()-_=+[]{}|;:',.<>?/`~", c):
-				hasSpecial = true
-			}
-		}
+	// Validate username, names, and age
+	if validationErr := ValidateUserInput(username, firstName, lastName, ageVal); validationErr != nil {
+		return c.JSON(validationErr)
 	}
 
-	if !(hasUpper && hasLower && hasNumber && hasSpecial) {
-		return c.JSON(errors.ErrorModel{
-			Message:   "Password must be at least 8 characters long and include uppercase, lowercase, number, and special character",
-			IsSuccess: false,
+	// Validate email
+	if !isEmailValid(email) {
+		return c.JSON(response.ResponseModel{
+			RetCode: "400",
+			Message: "Email format is not valid",
+			Data: errors.ErrorModel{
+				Message:   "Invalid email format",
+				IsSuccess: false,
+			},
 		})
 	}
 
-	hashedPassword, err := passwordHashing.HashPassword(password)
-	if err != nil {
-		return c.JSON(errors.ErrorModel{
-			Message:   "Failed to hash password",
-			IsSuccess: false,
-			Error:     err,
+	// Validate and hash password (registration requires password)
+	hashedPassword, passwordErr := ValidateAndHashPassword(password, false)
+	if passwordErr != nil {
+		return c.JSON(response.ResponseModel{
+			RetCode: "400",
+			Message: "Password must be at least 8 characters long and include uppercase, lowercase, number, and special character",
+			Data:    passwordErr,
 		})
 	}
 
+	// Call DB function
 	var feedback string
-	err = db.Raw(
-		"SELECT create_user($1, $2, $3, $4, $5, $6) AS feedback",
-		user["username"],
+	if err := db.Raw(
+		"SELECT create_user($1,$2,$3,$4,$5,$6) AS feedback",
+		username,
 		email,
 		hashedPassword,
-		user["first_name"],
-		user["last_name"],
-		age,
-	).Scan(&feedback).Error
-	if err != nil {
-		log.Println("[DEBUG] Database error during user creation:", err)
-		return c.JSON(errors.ErrorModel{
-			Message:   "Database error",
-			IsSuccess: false,
-			Error:     err,
+		firstName,
+		lastName,
+		ageVal,
+	).Scan(&feedback).Error; err != nil {
+		log.Println("[DEBUG] Database error:", err)
+		return c.JSON(response.ResponseModel{
+			RetCode: "500",
+			Message: "Page has been broken",
+			Data: errors.ErrorModel{
+				Message:   "Database error during user creation",
+				IsSuccess: false,
+				Error:     err,
+			},
 		})
 	}
 
-	return c.JSON(errors.ErrorModel{
-		Message:   feedback,
-		IsSuccess: true,
+	// Success response
+	if feedback == "Email already exists" || feedback == "Username already exists" {
+		return c.JSON(response.ResponseModel{
+			RetCode: "400",
+			Message: feedback,
+			Data: errors.ErrorModel{
+				Message:   feedback,
+				IsSuccess: false,
+			},
+		})
+	}
+
+	// Success case
+	return c.JSON(response.ResponseModel{
+		RetCode: "100",
+		Message: "User created successfully",
+		Data: errors.ErrorModel{
+			Message:   feedback,
+			IsSuccess: true,
+		},
 	})
 }
 
+// ========================= Login User =========================
 func LoginUser(c *fiber.Ctx) error {
-	// Parse request body
 	input := make(map[string]string)
 	if err := c.BodyParser(&input); err != nil {
-		log.Println("[DEBUG] Failed to parse request body:", err)
-		return c.JSON(errors.ErrorModel{
-			Message:   "Cannot parse JSON",
-			IsSuccess: false,
-			Error:     err,
+		return c.JSON(response.ResponseModel{
+			RetCode: "400",
+			Message: "Invalid request body",
+			Data: errors.ErrorModel{
+				Message:   "Cannot parse JSON",
+				IsSuccess: false,
+				Error:     err,
+			},
 		})
 	}
 
-	// Get email and password, trim spaces
 	email := strings.TrimSpace(input["email"])
 	password := input["password"]
 
-	log.Printf("[DEBUG] Login attempt received for email: '%s'\n", email)
-
-	if email == "" {
-		log.Println("[DEBUG] Email field is empty")
-		return c.JSON(errors.ErrorModel{
-			Message:   "Email is required",
-			IsSuccess: false,
-		})
-	}
-	if password == "" {
-		log.Println("[DEBUG] Password field is empty")
-		return c.JSON(errors.ErrorModel{
-			Message:   "Password is required",
-			IsSuccess: false,
+	if email == "" || password == "" {
+		return c.JSON(response.ResponseModel{
+			RetCode: "400",
+			Message: "Email and password are required",
+			Data: errors.ErrorModel{
+				Message:   "Missing credentials",
+				IsSuccess: false,
+			},
 		})
 	}
 
 	db := middleware.DBConn
-
-	// Query user dynamically into a map
 	user := make(map[string]interface{})
+
 	err := db.Raw("SELECT * FROM get_user_by_email($1)", email).Scan(&user).Error
-	if err != nil {
-		// err will contain the message from PostgreSQL
-		log.Println("[DEBUG] Database query error:", err)
-
-		// Check if the error contains the specific message
-		errMsg := err.Error()
-		friendlyMsg := "Invalid email or password" // default
-
-		if strings.Contains(errMsg, "No account exists with this email") {
-			friendlyMsg = "No account exists with this email"
-		}
-
-		return c.JSON(errors.ErrorModel{
-			Message:   friendlyMsg,
-			IsSuccess: false,
-			Error:     err,
-		})
-	}
-
-	if user["user_id"] == nil || user["password_hash"] == nil {
-		log.Printf("[DEBUG] No user found with email: '%s'\n", email)
-		return c.JSON(errors.ErrorModel{
-			Message:   "No user found with email",
-			IsSuccess: false,
+	if err != nil || user["user_id"] == nil {
+		return c.JSON(response.ResponseModel{
+			RetCode: "400",
+			Message: "Invalid email or password",
+			Data: errors.ErrorModel{
+				Message:   "Invalid input body",
+				IsSuccess: false,
+				Error:     err,
+			},
 		})
 	}
 
 	passwordHash, ok := user["password_hash"].(string)
-	if !ok {
-		log.Printf("[DEBUG] Password hash type assertion failed for email: '%s'\n", email)
-		return c.JSON(errors.ErrorModel{
-			Message:   "Invalid email or password",
-			IsSuccess: false,
+	if !ok || !passwordHashing.CheckPasswordHash(password, passwordHash) {
+		return c.JSON(response.ResponseModel{
+			RetCode: "400",
+			Message: "Invalid email or password",
+			Data: errors.ErrorModel{
+				Message:   "Invalid input body",
+				IsSuccess: false,
+			},
 		})
 	}
 
-	// Debug stored hash
-	log.Printf("[DEBUG] Stored hash for '%s': %s\n", email, passwordHash)
-
-	// Compare password
-	if !passwordHashing.CheckPasswordHash(password, passwordHash) {
-		log.Printf("[DEBUG] Password mismatch for user: '%s'\n", email)
-		return c.JSON(errors.ErrorModel{
-			Message:   "Invalid email or password",
-			IsSuccess: false,
-		})
-	}
-
-	log.Printf("[DEBUG] Login successful for user: '%s'\n", email)
-
-	// Generate JWT token using fiberUtils
-	fiberUtils.Ctx.New(c) // Copy context
+	// Generate JWT
+	fiberUtils.Ctx.New(c)
 	tokenPayload := map[string]interface{}{
 		"user_id": user["user_id"],
 		"email":   email,
 	}
-
-	tokenString, err := fiberUtils.GenerateJWTSignedString(tokenPayload)
+	token, err := fiberUtils.GenerateJWTSignedString(tokenPayload)
 	if err != nil {
-		log.Println("[DEBUG] Token generation failed:", err)
-		return c.JSON(errors.ErrorModel{
-			Message:   "Login successful, but failed to generate token",
-			IsSuccess: false,
-			Error:     err,
+		return c.JSON(response.ResponseModel{
+			RetCode: "500",
+			Message: "Login succeeded, but the problem is on us",
+			Data: errors.ErrorModel{
+				Message:   "Token generation failed",
+				IsSuccess: false,
+				Error:     err,
+			},
 		})
 	}
 
-	// Return token in response
-	return c.JSON(map[string]interface{}{
-		"message":   "Login successful",
-		"isSuccess": true,
-		"token":     tokenString,
+	return c.JSON(response.ResponseModel{
+		RetCode: "100",
+		Message: "Login successfully!",
+		Data: map[string]any{
+			"message":   "Login successful",
+			"token":     token,
+			"isSuccess": true,
+		},
 	})
 }
 
-// REQUIRED JWT TOKEN
+// ========================= Get Personal Details =========================
+// GetPersonalDetails handles fetching user details
 func GetPersonalDetails(c *fiber.Ctx) error {
 	db := middleware.DBConn
 
@@ -235,186 +211,312 @@ func GetPersonalDetails(c *fiber.Ctx) error {
 	claims := fiberUtils.GetJWTClaims()
 	userID, ok := claims["user_id"].(float64) // JWT numbers come as float64
 	if !ok {
-		return c.JSON(errors.ErrorModel{
-			Message:   "Invalid token: user_id not found",
-			IsSuccess: false,
-		})
-	}
-
-	// Query user personal details
-	user := make(map[string]interface{})
-	// get_personal_details_by_id is a function that returns user details by user_id
-	err := db.Raw("SELECT * FROM get_personal_details_by_id($1)", userID).Scan(&user).Error
-
-	if err != nil {
-		return c.JSON(errors.ErrorModel{
-			Message:   "Failed to fetch user details",
-			IsSuccess: false,
-			Error:     err,
-		})
-	}
-
-	if user["user_id"] == nil {
-		return c.JSON(errors.ErrorModel{
-			Message:   "User not found",
-			IsSuccess: false,
-		})
-	}
-
-	// Return personal details
-	return c.JSON(map[string]interface{}{
-		"message":   "User details fetched successfully",
-		"isSuccess": true,
-		"data":      user,
-	})
-}
-func UpdatePersonalDetails(c *fiber.Ctx) error {
-	db := middleware.DBConn
-
-	// Parse request body into a map
-	user := make(map[string]any)
-	if err := c.BodyParser(&user); err != nil {
-		return c.JSON(errors.ErrorModel{
-			Message:   "Cannot parse JSON",
-			IsSuccess: false,
-			Error:     err,
-		})
-	}
-
-	// Extract user_id from JWT
-	fiberUtils.Ctx.New(c)
-	claims := fiberUtils.GetJWTClaims()
-	userIDFloat, ok := claims["user_id"].(float64)
-	if !ok {
-		return c.JSON(errors.ErrorModel{
-			Message:   "Invalid token: user_id not found",
-			IsSuccess: false,
-		})
-	}
-	userID := int(userIDFloat)
-
-	// Extract and sanitize fields
-	username := ""
-	if v, ok := user["username"].(string); ok {
-		username = strings.TrimSpace(v)
-	}
-
-	email := ""
-	if v, ok := user["email"].(string); ok {
-		email = strings.ToLower(strings.TrimSpace(v))
-	}
-
-	firstName := ""
-	if v, ok := user["first_name"].(string); ok {
-		firstName = strings.TrimSpace(v)
-	}
-
-	lastName := ""
-	if v, ok := user["last_name"].(string); ok {
-		lastName = strings.TrimSpace(v)
-	}
-
-	var agePtr *int
-	if v, ok := user["age"].(float64); ok {
-		a := int(v)
-		agePtr = &a
-	}
-
-	passwordPtr := (*string)(nil) // nil if password not provided
-	if v, ok := user["password"].(string); ok && v != "" {
-		password := v
-
-		// Password complexity check
-		var hasUpper, hasLower, hasNumber, hasSpecial bool
-		if len(password) >= 8 {
-			for _, c := range password {
-				switch {
-				case 'A' <= c && c <= 'Z':
-					hasUpper = true
-				case 'a' <= c && c <= 'z':
-					hasLower = true
-				case '0' <= c && c <= '9':
-					hasNumber = true
-				case strings.ContainsRune("!@#$%^&*()-_=+[]{}|;:',.<>?/`~", c):
-					hasSpecial = true
-				}
-			}
-		}
-
-		if !(hasUpper && hasLower && hasNumber && hasSpecial) {
-			return c.JSON(errors.ErrorModel{
-				Message:   "Password must be at least 8 characters long and include uppercase, lowercase, number, and special character",
+		return c.JSON(response.ResponseModel{
+			RetCode: "401",
+			Message: "Invalid token: user_id missing",
+			Data: errors.ErrorModel{
+				Message:   "Invalid token",
 				IsSuccess: false,
-			})
-		}
+			},
+		})
+	}
 
-		// Hash password
-		hashed, err := passwordHashing.HashPassword(password)
-		if err != nil {
-			return c.JSON(errors.ErrorModel{
-				Message:   "Failed to hash password",
+	// ✅ Call your Postgres function (RAW SQL)
+	var user map[string]any
+	err := db.Raw("SELECT * FROM get_personal_details_by_id($1)", int(userID)).Scan(&user).Error
+	if err != nil {
+		return c.JSON(response.ResponseModel{
+			RetCode: "404",
+			Message: "User not found",
+			Data: errors.ErrorModel{
+				Message:   "User not found",
 				IsSuccess: false,
 				Error:     err,
-			})
-		}
-		passwordPtr = &hashed
-	}
-
-	// Call DB function: exactly 7 parameters
-	var feedback string
-	err := db.Raw(
-		"SELECT update_user($1,$2,$3,$4,$5,$6,$7)",
-		userID,
-		username,
-		email,
-		passwordPtr, // pointer, nil will be NULL in DB
-		firstName,
-		lastName,
-		agePtr,
-	).Scan(&feedback).Error
-	if err != nil {
-		return c.JSON(errors.ErrorModel{
-			Message:   "Database error",
-			IsSuccess: false,
-			Error:     err,
+			},
 		})
 	}
 
-	return c.JSON(errors.ErrorModel{
-		Message:   feedback,
-		IsSuccess: true,
+	// ✅ Return user data + success info
+	return c.JSON(response.ResponseModel{
+		RetCode: "100",
+		Message: "User fetched successfully",
+		Data: map[string]any{
+			"user": user,
+			"info": errors.ErrorModel{
+				Message:   "User fetched successfully",
+				IsSuccess: true,
+			},
+		},
 	})
 }
 
-// REQUIRED JWT TOKEN
-func DeleteUser(c *fiber.Ctx) error {
+// ========================= Update Personal Details =========================
+// UpdatePersonalDetails updates user info using stored procedure
+func UpdatePersonalDetails(c *fiber.Ctx) error {
 	db := middleware.DBConn
-
-	// Copy context for fiberUtils
 	fiberUtils.Ctx.New(c)
 
 	// Extract user_id from JWT token
 	claims := fiberUtils.GetJWTClaims()
-	userID, ok := claims["user_id"].(float64) // JWT numbers come as float64
+	userID, ok := claims["user_id"].(float64)
 	if !ok {
-		return c.JSON(errors.ErrorModel{
-			Message:   "Invalid token: user_id not found",
-			IsSuccess: false,
+		return c.JSON(response.ResponseModel{
+			RetCode: "401",
+			Message: "Unauthorized",
+			Data: errors.ErrorModel{
+				Message:   "Missing or invalid user_id in token",
+				IsSuccess: false,
+			},
 		})
 	}
 
-	// Execute the delete function in PostgreSQL
+	// Parse request body
+	var req map[string]any
+	if err := c.BodyParser(&req); err != nil {
+		return c.JSON(response.ResponseModel{
+			RetCode: "400",
+			Message: "Invalid request body",
+			Data: errors.ErrorModel{
+				Message:   err.Error(),
+				IsSuccess: false,
+			},
+		})
+	}
+
+	// Extract fields from request
+	username, _ := req["username"].(string)
+	email, _ := req["email"].(string)
+	password, _ := req["password"].(string) // raw password from request
+	firstName, _ := req["first_name"].(string)
+	lastName, _ := req["last_name"].(string)
+
+	var age *int
+	if val, ok := req["age"].(float64); ok {
+		tmp := int(val)
+		age = &tmp
+	}
+
+	//val;idate email
+	if !isEmailValid(email) {
+		return c.JSON(response.ResponseModel{
+			RetCode: "400",
+			Message: "Invalid email format",
+			Data: errors.ErrorModel{
+				Message:   "Email format is not valid",
+				IsSuccess: false,
+			},
+		})
+	}
+	// Validate and hash password
+	hashedPassword, passErr := ValidateAndHashPassword(password, true) // empty allowed
+	if passErr != nil {
+		return c.JSON(response.ResponseModel{
+			RetCode: "400",
+			Message: "Password must be at least 8 characters long and include uppercase, lowercase, number, and special character",
+			Data:    passErr,
+		})
+	}
+
+	// Call stored procedure
+	var feedback string
+	dbErr := db.Raw(
+		"SELECT update_user($1, $2, $3, $4, $5, $6, $7)",
+		int(userID), username, email, hashedPassword, firstName, lastName, age,
+	).Scan(&feedback).Error
+
+	if dbErr != nil {
+		return c.JSON(response.ResponseModel{
+			RetCode: "500",
+			Message: "Database error",
+			Data: errors.ErrorModel{
+				Message:   dbErr.Error(),
+				IsSuccess: false,
+			},
+		})
+	}
+
+	// ✅ Determine success/failure from feedback
+	success := strings.Contains(strings.ToLower(feedback), "success")
+
+	return c.JSON(response.ResponseModel{
+		RetCode: func() string {
+			if success {
+				return "100"
+			}
+			return "400"
+		}(),
+		Message: feedback, // direct message from function (e.g. "Email already exists")
+		Data: map[string]any{
+			"feedback": feedback,
+			"user": map[string]any{
+				"username":   username,
+				"email":      email,
+				"first_name": firstName,
+				"last_name":  lastName,
+				"age":        age,
+			},
+			"info": errors.ErrorModel{
+				Message:   feedback,
+				IsSuccess: success,
+			},
+		},
+	})
+}
+
+// ========================= Delete User =========================
+func DeleteUser(c *fiber.Ctx) error {
+	db := middleware.DBConn
+	fiberUtils.Ctx.New(c)
+
+	claims := fiberUtils.GetJWTClaims()
+	userID, ok := claims["user_id"].(float64)
+	if !ok {
+		return c.JSON(response.ResponseModel{
+			RetCode: "401",
+			Message: "Invalid token",
+			Data: errors.ErrorModel{
+				Message:   "Invalid token: user_id not found",
+				IsSuccess: false,
+			},
+		})
+	}
+
 	err := db.Exec("SELECT delete_user($1)", int(userID)).Error
 	if err != nil {
-		return c.JSON(errors.ErrorModel{
-			Message:   "Failed to delete user",
-			IsSuccess: false,
-			Error:     err,
+		return c.JSON(response.ResponseModel{
+			RetCode: "500",
+			Message: "Database error",
+			Data: errors.ErrorModel{
+				Message:   "Failed to delete user",
+				IsSuccess: false,
+				Error:     err,
+			},
 		})
 	}
 
-	return c.JSON(map[string]interface{}{
-		"message":   "User deleted successfully",
-		"isSuccess": true,
+	return c.JSON(response.ResponseModel{
+		RetCode: "100",
+		Message: "User deleted successfully",
+		Data: errors.ErrorModel{
+			Message:   "User deleted successfully",
+			IsSuccess: true,
+		},
 	})
+}
+
+// ========================= Helpers =========================
+// ===================== Helper: Validate Required Fields =====================
+func ValidateUserInput(username, firstName, lastName string, age float64) *response.ResponseModel {
+	if strings.ToLower(strings.TrimSpace(username)) == "" {
+		return &response.ResponseModel{
+			RetCode: "400",
+			Message: "Username is required",
+			Data: errors.ErrorModel{
+				Message:   "Username cannot be empty",
+				IsSuccess: false,
+			},
+		}
+	}
+
+	if strings.TrimSpace(firstName) == "" {
+		return &response.ResponseModel{
+			RetCode: "400",
+			Message: "First name is required",
+			Data: errors.ErrorModel{
+				Message:   "First name cannot be empty",
+				IsSuccess: false,
+			},
+		}
+	}
+
+	if strings.TrimSpace(lastName) == "" {
+		return &response.ResponseModel{
+			RetCode: "400",
+			Message: "Last name is required",
+			Data: errors.ErrorModel{
+				Message:   "Last name cannot be empty",
+				IsSuccess: false,
+			},
+		}
+	}
+
+	if age <= 0 {
+		return &response.ResponseModel{
+			RetCode: "400",
+			Message: "Age is required",
+			Data: errors.ErrorModel{
+				Message:   "Age must be a positive number",
+				IsSuccess: false,
+			},
+		}
+	}
+
+	return nil
+}
+
+func ValidateAndHashPassword(password string, isUpdate bool) (string, *errors.ErrorModel) {
+	// If blank password
+	if password == "" {
+		if isUpdate {
+			return "", nil // allow empty password on update
+		} else {
+			return "", &errors.ErrorModel{
+				Message:   "Password cannot be empty",
+				IsSuccess: false,
+			}
+		}
+	}
+
+	// Password complexity check
+	if !isPasswordStrong(password) {
+		return "", &errors.ErrorModel{
+			Message:   "Password validation failed",
+			IsSuccess: false,
+		}
+	}
+
+	// Hash password
+	hashed, err := passwordHashing.HashPassword(password)
+	if err != nil {
+		return "", &errors.ErrorModel{
+			Message:   "Failed to hash password: " + err.Error(),
+			IsSuccess: false,
+			Error:     err,
+		}
+	}
+
+	return hashed, nil
+}
+
+func isPasswordStrong(password string) bool {
+	// Reject empty password immediately (spaces are allowed)
+
+	var hasUpper, hasLower, hasNumber, hasSpecial bool
+
+	// Password must be at least 8 characters
+	if len(password) < 8 {
+		return false
+	}
+
+	for _, c := range password {
+		switch {
+		case 'A' <= c && c <= 'Z':
+			hasUpper = true
+		case 'a' <= c && c <= 'z':
+			hasLower = true
+		case '0' <= c && c <= '9':
+			hasNumber = true
+		case strings.ContainsRune("!@#$%^&*()-_=+[]{}|;:',.<>?/`~", c):
+			hasSpecial = true
+		}
+	}
+
+	return hasUpper && hasLower && hasNumber && hasSpecial
+}
+
+// isEmailValid checks if email matches allowed domains
+func isEmailValid(email string) bool {
+	regex := `^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.(com|net|org|edu|gov)$`
+	re := regexp.MustCompile(regex)
+	return re.MatchString(email)
 }
