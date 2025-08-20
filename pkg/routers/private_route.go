@@ -3,7 +3,7 @@ package routers
 import (
 	"time"
 
-	//controllers "github.com/Conding-Student/study_template/pkg/controllers"
+	controllers "github.com/Conding-Student/study_template/pkg/controllers"
 	"github.com/Conding-Student/study_template/pkg/controllers/healthchecks"
 	middleware "github.com/Conding-Student/study_template/pkg/utils"
 
@@ -30,5 +30,8 @@ func SetupPrivateRoutes(app *fiber.App) {
 	v1Endpoint.Get("/", healthchecks.CheckServiceHealth)
 
 	//register user
+	v1Endpoint.Get("/personaldata", controllers.GetPersonalDetails)
+	v1Endpoint.Put("/updatepersonaldata", controllers.UpdatePersonalDetails)
+	v1Endpoint.Delete("/deleteaccount", controllers.DeleteUser)
 
 }

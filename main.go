@@ -72,7 +72,8 @@ func main() {
 	// Configure application CORS
 	app.Use(cors.New(cors.Config{
 		AllowOrigins: "*",
-		AllowHeaders: "Origin, Content-Type, Accept, Authorization",
+		AllowHeaders: "Origin, Content-Type, Accept, Authorization", // ✅ Add Authorization
+		AllowMethods: "GET,POST,PUT,DELETE,OPTIONS",
 	}))
 
 	// For GoRoutine implementation
